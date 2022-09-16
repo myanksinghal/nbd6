@@ -18,18 +18,44 @@ import struct
 from astropy.table import Table
 
 class snapshot:
+    """Each time snapshot in the nbody6 run.
+    """
+
     def __init__(self,time,header,M,X,V,N):
+        """__init__.
+
+        Parameters
+        ----------
+        time :
+            time of the snapshot in Myr
+        header :
+            header of the OUT3 file 
+        M :
+            Masses of each object in the snapshot 
+        X :
+            Pos of each object in the snapshot
+        V :
+            Vel of each object in the snapshot
+        N :
+            Name of each object in the snapshot
+        """
         self.time=time
         self.o3_header=header
-        self.M=M
-        self.X=X
-        self.V=V
-        self.N=N
         self.out3=Table([M, X, V, N],names=('Mass', 'X', 'V', 'name'),meta={'name': 'OUT3'})
 
         
 class nb6run:
+    """NBody6 run
+    """
+
     def __init__(self,PATH):
+        """__init__.
+
+        Parameters
+        ----------
+        PATH :
+            Path of the Output files of Nbody6
+        """
         self.PATH=PATH
         n,headers,Ms,Xs,Vs,Ns=self.read_out3()
         self.snaps=self.snapshots_out3(n,headers,Ms,Xs,Vs,Ns)
@@ -39,6 +65,23 @@ class nb6run:
         
         
     def snapshots_out3(self,n,headers,Ms,Xs,Vs,Ns):
+        """Creates snapshots out of the OUT3 data.
+
+        Parameters
+        ----------
+        n :
+            number of snapshots
+        headers :
+            array of headers of OUT3 
+        Ms :
+            array of masses in each snapshot
+        Xs :
+            array of positions of each object in each snapshot
+        Vs :
+            array of velocities of each object in each snapshot
+        Ns :
+            array of names of each object in each snapshot
+        """
         snap_array=[]
         for i in range(0,n):
             time=headers[i][3]
@@ -51,6 +94,23 @@ class nb6run:
         return snap_array
     
     def snapshots_out9(self,n,time_arr,headers,E_ks,ks_bindata_snp,Npair_arr):
+        """snapshots_out9.
+
+        Parameters
+        ----------
+        n :
+            n
+        time_arr :
+            time_arr
+        headers :
+            headers
+        E_ks :
+            E_ks
+        ks_bindata_snp :
+            ks_bindata_snp
+        Npair_arr :
+            Npair_arr
+        """
         for i in range(0,n):
             if time_arr[i]*self.snaps[i].o3_header[4][10]==self.snaps[i].time:
                 self.snaps[i].o9_header=headers[i]
@@ -62,6 +122,8 @@ class nb6run:
 
             
     def read_out9(self):
+        """read_out9.
+        """
         filename=self.PATH+'OUT9'
         with open(filename, "r") as f:
             #Information in bindat.f
@@ -97,6 +159,8 @@ class nb6run:
     
     
     def read_out3(self):
+        """read_out3.
+        """
         #Info in output.f
         filename=self.PATH+'OUT3'
         with open(filename, "rb") as f:
