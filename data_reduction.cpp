@@ -1,3 +1,6 @@
+// Code to analyse the orb_elements file to find interactions of binaries in the system, mainly catches hyperbolic interaction.
+
+
 #include <iterator>
 #include <map>
 #include <cstdio>
@@ -6,15 +9,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <iostream>
-//#include <omp.h>
-//#include <string>
-#include <unordered_map>
-
+#include <omp.h>
+#include <string>
+//#include <mpi.h>
+#include <algorithm>
+#include <string>
+#include <vector>
+#include <filesystem>
 
 using namespace std;
 
 
-
+const int NUM_THREADS=10;
 
 struct event{
 	
@@ -29,99 +35,148 @@ struct event{
 
 };
 	
-typedef unordered_multimap<long long, event> hmap;
-typedef long long key_type;
 const auto relative_difference_factor = 0.0005;  // 0.05%
-hmap pos_map;
-hmap neg_map;
-
 void print_event(event m)
 {
 	printf("Time is %8.8f, id1= %d, id2= %d, m1= %4.8f, m2= %4.8f, ecc= %4.4f, a= %4.4f\n", m.time,m.id1,m.id2,m.m1,m.m2,m.ecc,m.a);
 }
 
-
-key_type hash_func(long id1,long id2)
-{	key_type hs;
-//string hs;
-//hs=to_string(id1) + "," + to_string(id2);
-	hs=id2+((id1 + id2 +1)*(id1+id2)/2);
-	return hs;
-
-};
-
-bool check_key(hmap m, key_type key)
-{	//printf("Number of keys: %d\n",m.count(key));
-	if (m.count(key)==0)
-		return false;
-	return true;
-
-}
-
-void save_csv(hmap map,const char* storage_path)
+void save_csv(vector<event> map,const char* storage_path, int file_num)
 {	FILE * outfile;
+	if (file_num!=0){
+	outfile=fopen(storage_path,"a");
+	}
+	else {
 	outfile=fopen(storage_path,"w");
+	}
 	for (auto it = map.begin(); it != map.end(); it++) 
 		{
-         event f=it->second;
+         event f=*it;
 		 fprintf(outfile,"%8.3f,%7d,%7d,%7.12f,%7.12f,%8.10f,%8.10f\n",f.time, f.id1, f.id2, f.m1, f.m2, f.a,f.ecc);
 		}
 	fclose(outfile);
 }
+vector <vector <event>::iterator> find_index( vector <event> map,long fid1,long fid2)
+{	vector <event>::iterator iter = begin(map);
+	vector <vector<event>::iterator> iterator_arr;
+	while((iter = find_if(iter, map.end(), [=](event found_event){
+if(found_event.id1 == fid1 &&found_event.id2==fid2)
+	{
+		return true;
+	}
+else{
+	return false;
+	}
+}))!=end(map))
+			{
+				if(iter!=map.end()){
+				iterator_arr.push_back(iter);
+				}
+				iter++;
+			}
 
 
+	return iterator_arr;
+}
 
-hmap data_reduction()
+
+vector<event> data_reduction(vector <event> &pos_map, vector <event> &neg_map)
 {
-	event min_pos_ev;
-	bool min_found;
-	float min_time_diff;
+	vector<event> matching_map[NUM_THREADS];
 
-	hmap matching_map;
-//	#pragma omp for
-	for (hmap::iterator it=neg_map.begin(); it!=neg_map.end(); it++) 
-//	for(int i =0; i<neg_map.size(); i++)
-	{	//printf("Negative event\n");
-//		auto it=neg_map.begin();		
-//		advance(it,i);
-		const key_type key=it->first;
+	int len_map=neg_map.size();
+	int n_per_thread = len_map/NUM_THREADS;
+	int i;
+
+#pragma omp parallel num_threads(NUM_THREADS) shared(matching_map, pos_map,neg_map) private(i) 
+	{	
+		int count=0;
+
+	//#pragma omp for schedule(static,1)
+	for(i=omp_get_thread_num()*n_per_thread; i<(omp_get_thread_num()+1)*n_per_thread; i++)
+	{	
+		//printf("Negative event\n");
+	//	if (omp_get_thread_num()==0)
+	//	printf("%d\n",i);
 		
-		event neg_ev=it->second;
+		auto it=neg_map.begin();		
+		advance(it,i);
+		const event neg_ev=*it;
+		const long fid1=neg_ev.id1;
+		const long fid2=neg_ev.id2;
+		event min_pos_ev;
+		bool min_found;
+		float min_time_diff;
+		auto pos_itr_arr=find_index(pos_map,fid1,fid2);
+		//printf("size of pos_itr_arr is %d\n",pos_itr_arr.size());
 		//print_event(neg_ev);
-		if (check_key(pos_map, key)) 
+
+		//printf("index %d\n",i);
+		if (pos_itr_arr.size()!=0) 
 		{	//printf("Positive events\n");
-			auto pos_itr=pos_map.equal_range(key);	
+			//auto pos_itr=pos_map.equal_range(key);	
+			count++;
 			min_found=false;
 			min_time_diff=neg_ev.time;
-			for (auto pos_it=pos_itr.first;pos_it!=pos_itr.second;pos_it++)
-			{	
-				event pos_ev=pos_it->second;
-				if (pos_ev.time<=neg_ev.time && min_time_diff>neg_ev.time-pos_ev.time)
-				{
+			for (auto pos_it_point=pos_itr_arr.begin(); pos_it_point<pos_itr_arr.end();pos_it_point++)
+			{	auto pos_it=*pos_it_point;
+				if(pos_it<pos_map.end())
+				{	
+				event pos_ev=*pos_it;
+
+					if (pos_ev.time<=neg_ev.time && min_time_diff>neg_ev.time-pos_ev.time)
+					{
 					min_time_diff=neg_ev.time-pos_ev.time;
 					min_pos_ev=pos_ev;
 					min_found=true;
-			//		print_event(pos_ev);
+
+					}
+	
+				}
+
+
+			}
+			if (min_found && abs(min_pos_ev.a-neg_ev.a)<relative_difference_factor* max(abs(min_pos_ev.a),abs(neg_ev.a))) 
+			{
+				{
+				matching_map[omp_get_thread_num()].push_back(neg_ev);
 				}
 			}
-			const auto greater_magnitude = max(abs(min_pos_ev.a),abs(neg_ev.a));
-			if (min_found && abs(min_pos_ev.a-neg_ev.a)<relative_difference_factor*greater_magnitude) 
-			{
-				matching_map.insert({key,neg_ev});
-			}
 		}
-	//	printf("End of neg event\n");
+
 	}
-	return matching_map;
+	printf("index for thread %d is %d-%d\n",omp_get_thread_num(),omp_get_thread_num()*n_per_thread,(omp_get_thread_num()+1)*n_per_thread);
+		printf("count of thread %d is %d\n",omp_get_thread_num(),count);
+	printf("size of matching map for thread %d is %d\n",omp_get_thread_num(),matching_map[omp_get_thread_num()].size());
+	
+}
+
+//printf("size of matching map total is %d\n",int(matching_map[0].size())+int(matching_map[1].size()));
+
+vector <event> flattened_matching_map;
+
+for(int th=0; th<NUM_THREADS;th++)
+{
+	for(auto len=matching_map[th].begin();len<matching_map[th].end();len++)
+	{	
+		flattened_matching_map.push_back(*len);
+	}
+
+}
+return flattened_matching_map;
 
 }
 
 
-void read_csv()
+void read_csv(vector <event> & pos_map, vector <event> &neg_map,int file_num)
 {
 
 	FILE * orb_file;
-	orb_file=fopen("orb_elements.csv","r");
+	string file_num_append;
+	file_num_append=to_string(file_num);
+	string file_name="split/orb_elements_"+file_num_append+".csv";
+	const char* file_name_char = file_name.c_str();
+	orb_file=fopen(file_name_char,"r");
 	char content[1024];
 	while(fgets(content,1024,orb_file))
 	{
@@ -143,15 +198,13 @@ void read_csv()
 		temp_event.m2=stod(split[5]);
 		temp_event.ecc=stod(split[6]);
 		temp_event.a=stod(split[7]);
-		key_type key;
-		key=hash_func(temp_event.id1,temp_event.id2);
 		if (*split[0]=='+') 
 		{			
-			pos_map.insert({key,temp_event});
+			pos_map.push_back(temp_event);
 		}
 		else 
 		{
-			neg_map.insert({key,temp_event});
+			neg_map.push_back(temp_event);
 		}
 
 	};
@@ -163,19 +216,23 @@ void read_csv()
 
 
 int main(){
+int file_count=0;
 
-	read_csv();
-	save_csv(pos_map, "test_pos.csv");
-	save_csv(neg_map, "test_neg.csv");
-	hmap matching_map=data_reduction();
-	printf("The load factor of the new dataset is: %2.2f",matching_map.load_factor());
-	save_csv(matching_map, "test_reduced.csv");
+for (auto & entry : std::filesystem::directory_iterator("split/"))
+        file_count++;
+printf("number of files is %d\n",file_count);
 
+for(int file_num=0;file_num<file_count;file_num++){
+	vector<event> pos_map;
+	vector<event> neg_map;
+	read_csv(pos_map,neg_map,file_num);
+	save_csv(pos_map, "pos.csv",file_num);
+	save_csv(neg_map, "neg.csv",file_num);
 
-
-
-
-
+	auto matching_map=data_reduction(pos_map,neg_map);
+	save_csv(matching_map, "reduced.csv",file_num);
+	printf("file num %d completed\n",file_num);
+}
 
 /*	key_type testkey= hash_func(41325,  41326);
 	event f;

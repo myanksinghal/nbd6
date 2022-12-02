@@ -1,3 +1,8 @@
+//Modified version of the EVENTS file reading code written by Dr. Ladislav Subr
+//Computes the semi-major axis and eccentricity. Saves it in a file called orb_elements.csv
+
+
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
